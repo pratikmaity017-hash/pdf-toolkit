@@ -28,7 +28,7 @@ export async function getDocuments() {
   const db = await getDatabase();
 
   return db.getAllAsync(
-    `SELECT id, name, uri, size
+    `SELECT id, name, uri, size, created_at
      FROM documents
      ORDER BY created_at DESC;`,
   );
@@ -46,4 +46,25 @@ export async function saveDocument(document) {
     document.size,
     Date.now(),
   );
+}
+
+export async function renameDocument(id, newName) {
+  const db = await getDatabase();
+
+  console.log("SQLite rename test: database obtained");
+
+  const result = await db.runAsync(
+    "UPDATE documents SET name = ? WHERE id = ?",
+    [newName, id],
+  );
+
+  console.log("SQLite rename result:", result);
+
+  return result;
+}
+
+export async function deleteDocument(id) {
+  const db = await getDatabase();
+
+  await db.runAsync("DELETE FROM documents WHERE id = ?", [id]);
 }

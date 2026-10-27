@@ -1,5 +1,7 @@
-import { ScrollView, StyleSheet, Text, View } from "react-native";
-
+import { useState } from "react";
+import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
+import MergePDFsScreen from "./MergePDFsScreen";
+import ScannerScreen from "./ScannerScreen";
 const tools = [
   ["PDF Reader", "Open and read PDF documents"],
   ["Create PDF", "Create a PDF from text"],
@@ -11,6 +13,15 @@ const tools = [
 ];
 
 export default function ToolsScreen() {
+  const [showMergeScreen, setShowMergeScreen] = useState(false);
+  const [showScannerScreen, setShowScannerScreen] = useState(false);
+
+  if (showMergeScreen) {
+    return <MergePDFsScreen onBack={() => setShowMergeScreen(false)} />;
+  }
+  if (showScannerScreen) {
+    return <ScannerScreen onBack={() => setShowScannerScreen(false)} />;
+  }
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.eyebrow}>WORK WITH DOCUMENTS</Text>
@@ -20,7 +31,18 @@ export default function ToolsScreen() {
       </Text>
 
       {tools.map(([title, description], index) => (
-        <View style={styles.card} key={title}>
+        <Pressable
+          style={styles.card}
+          key={title}
+          onPress={() => {
+            if (title === "Merge PDFs") {
+              setShowMergeScreen(true);
+            }
+            if (title === "Scan Document") {
+              setShowScannerScreen(true);
+            }
+          }}
+        >
           <View style={styles.number}>
             <Text style={styles.numberText}>
               {String(index + 1).padStart(2, "0")}
@@ -33,7 +55,7 @@ export default function ToolsScreen() {
           </View>
 
           <Text style={styles.arrow}>›</Text>
-        </View>
+        </Pressable>
       ))}
 
       <Text style={styles.footer}>
