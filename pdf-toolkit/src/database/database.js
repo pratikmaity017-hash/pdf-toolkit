@@ -124,3 +124,17 @@ export async function updateDocumentPageCount(id, pageCount) {
     id,
   ]);
 }
+
+export async function updateDocumentUri(id, uri, size) {
+  if (!id || !uri) {
+    throw new Error("Document ID and URI are required.");
+  }
+
+  const db = await getDatabase();
+
+  return db.runAsync("UPDATE documents SET uri = ?, size = ? WHERE id = ?;", [
+    uri,
+    size ?? 0,
+    id,
+  ]);
+}

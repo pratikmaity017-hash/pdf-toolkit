@@ -829,12 +829,8 @@ export default function ReaderScreen({ document, onBack }) {
               onMessage={async (event) => {
                 const message = event.nativeEvent.data;
 
-                
-
                 if (message.startsWith("pageCount:")) {
                   const pageCount = Number(message.slice("pageCount:".length));
-
-                  
 
                   if (
                     Number.isInteger(pageCount) &&
@@ -843,7 +839,6 @@ export default function ReaderScreen({ document, onBack }) {
                   ) {
                     try {
                       await updateDocumentPageCount(document.id, pageCount);
-                     
                     } catch (error) {
                       console.error("Failed to save PDF page count:", error);
                     }
