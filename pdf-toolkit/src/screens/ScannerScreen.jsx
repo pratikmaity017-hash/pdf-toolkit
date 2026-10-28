@@ -46,8 +46,6 @@ export default function ScannerScreen({ onBack }) {
         Alert.alert("Capture failed", "Please try taking the photo again.");
       }
     } catch (error) {
-      console.error("Scanner capture failed:", error);
-
       Alert.alert(
         "Capture failed",
         error?.message || "Could not capture the document.",
@@ -125,8 +123,6 @@ export default function ScannerScreen({ onBack }) {
       const pageWidth = 595.28;
       const pageHeight = 841.89;
 
-      console.log("Scanned pages to process:", capturedPages.length);
-
       for (const scannedPage of capturedPages) {
         // CameraView produces JPEG images.
         const imageBase64 = await FileSystem.readAsStringAsync(
@@ -137,12 +133,6 @@ export default function ScannerScreen({ onBack }) {
         );
 
         const embeddedImage = await pdfDocument.embedJpg(imageBase64);
-
-        console.log("Scanned image:", {
-          width: embeddedImage.width,
-          height: embeddedImage.height,
-          base64Length: imageBase64.length,
-        });
 
         const page = pdfDocument.addPage([pageWidth, pageHeight]);
         // Fit the image inside A4 without stretching it.
@@ -160,11 +150,6 @@ export default function ScannerScreen({ onBack }) {
           width: imageWidth,
           height: imageHeight,
         });
-        console.log("Image drawn on PDF page:", {
-          imageWidth: embeddedImage.width,
-          imageHeight: embeddedImage.height,
-          pageNumber: pdfDocument.getPageCount(),
-        });
       }
 
       // Save the PDF in the same app folder used by the Library.
@@ -180,19 +165,8 @@ export default function ScannerScreen({ onBack }) {
       const timestamp = Date.now();
       const id = `scan-${timestamp}-${baseName}.pdf`;
       const destinationFile = new File(pdfDirectory, id);
-      console.log("PDF page count:", pdfDocument.getPageCount());
 
-      console.log(
-        "PDF page sizes:",
-        pdfDocument.getPages().map((page) => page.getSize()),
-      );
       const pdfBytes = await pdfDocument.save();
-
-      console.log("Generated PDF diagnostics:", {
-        pageCount: pdfDocument.getPageCount(),
-        byteLength: pdfBytes.length,
-        firstBytes: Array.from(pdfBytes.slice(0, 8)),
-      });
 
       const pdfBase64 = bytesToBase64(pdfBytes);
 
@@ -201,11 +175,14 @@ export default function ScannerScreen({ onBack }) {
       });
 
       // Register the saved PDF in the existing SQLite database.
+
+      // Register the saved PDF in the existing SQLite database.
       await saveDocument({
         id,
         name: `${baseName}.pdf`,
         uri: destinationFile.uri,
         size: destinationFile.size || pdfBytes.length,
+        pageCount: capturedPages.length,
       });
 
       Alert.alert(
@@ -224,8 +201,6 @@ export default function ScannerScreen({ onBack }) {
         ],
       );
     } catch (error) {
-      console.error("Create scanned PDF failed:", error);
-
       Alert.alert(
         "PDF creation failed",
         error?.message || "Could not create and save the PDF.",

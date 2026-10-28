@@ -16,6 +16,7 @@ import {
   saveDocument,
   renameDocument,
   deleteDocument,
+  markDocumentOpened,
 } from "../database/database";
 import ReaderScreen from "./ReaderScreen";
 import * as DocumentPicker from "expo-document-picker";
@@ -32,6 +33,12 @@ export default function LibraryScreen() {
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState(null);
+
+  const [menuDocument, setMenuDocument] = useState(null);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [documentToDelete, setDocumentToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("date-newest");
 
@@ -70,9 +77,7 @@ export default function LibraryScreen() {
         multiple: true,
       });
 
-      if (result.canceled) {
-        return;
-      }
+      if (result.canceled) return;
 
       const assets = result.assets ?? [];
 
@@ -106,7 +111,6 @@ export default function LibraryScreen() {
 
           const safeName = fileName.replace(/[\\/]/g, "_");
           const storedName = `${Date.now()}-${importedDocuments.length}-${safeName}`;
-
           const destinationFile = new File(PDF_DIRECTORY, storedName);
 
           await FileSystem.copyAsync({
@@ -146,7 +150,6 @@ export default function LibraryScreen() {
       }
     } catch (error) {
       console.error("PDF import failed:", error);
-
       Alert.alert(
         "Import failed",
         error?.message || "Could not import the selected PDFs.",
@@ -164,84 +167,31 @@ export default function LibraryScreen() {
       switch (sortBy) {
         case "name-asc":
           return a.name.localeCompare(b.name);
-
         case "name-desc":
           return b.name.localeCompare(a.name);
-
         case "date-oldest":
           return (a.created_at ?? 0) - (b.created_at ?? 0);
-
         case "size-largest":
           return b.size - a.size;
-
         case "size-smallest":
           return a.size - b.size;
-
+        case "recently-opened":
+          return (b.last_opened_at ?? 0) - (a.last_opened_at ?? 0);
         case "date-newest":
         default:
           return (b.created_at ?? 0) - (a.created_at ?? 0);
       }
     });
 
-  function formatSize(bytes) {
-    if (bytes < 1024) {
-      return `${bytes} B`;
-    }
-
-    if (bytes < 1024 * 1024) {
-      return `${(bytes / 1024).toFixed(1)} KB`;
-    }
-
+  function formatSize(bytes = 0) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   }
 
-  function renderDocument({ item }) {
-    return (
-      <View style={styles.documentCard}>
-        <View style={styles.pdfIcon}>
-          <Text style={styles.pdfIconText}>PDF</Text>
-        </View>
-
-        <View style={styles.documentInfo}>
-          <Text style={styles.documentName} numberOfLines={2}>
-            {item.name}
-          </Text>
-
-          <Text style={styles.documentSize}>{formatSize(item.size)}</Text>
-        </View>
-
-        {/* Three-dot options menu */}
-        <Pressable
-          onPress={() =>
-            Alert.alert("Document options", item.name, [
-              {
-                text: "Open",
-                onPress: () => setSelectedDocument(item),
-              },
-
-              {
-                text: "Rename",
-                onPress: () => openRename(item),
-              },
-              {
-                text: "Delete",
-                style: "destructive",
-                onPress: () => handleDelete(item),
-              },
-              {
-                text: "Cancel",
-                style: "cancel",
-              },
-            ])
-          }
-          style={styles.menuButton}
-          accessibilityRole="button"
-          accessibilityLabel={`Options for ${item.name}`}
-        >
-          <Text style={styles.menuButtonText}>⋮</Text>
-        </Pressable>
-      </View>
-    );
+  function formatDate(timestamp) {
+    if (!timestamp) return "Not available";
+    return new Date(timestamp).toLocaleString();
   }
 
   function openRename(item) {
@@ -258,6 +208,27 @@ export default function LibraryScreen() {
     setRenameValue("");
   }
 
+  function closeDeleteConfirmation() {
+    if (deleting) return;
+
+    setDeleteConfirmVisible(false);
+    setDocumentToDelete(null);
+  }
+
+  async function openDocument(item) {
+    setMenuDocument(null);
+
+    if (!item) return;
+
+    try {
+      await markDocumentOpened(item.id);
+    } catch (error) {
+      console.error("Failed to update last-opened time:", error);
+    }
+
+    setSelectedDocument(item);
+  }
+
   async function handleRename() {
     if (!documentToRename || renaming) return;
 
@@ -268,7 +239,6 @@ export default function LibraryScreen() {
       return;
     }
 
-    // Ensure the saved display name ends in .pdf.
     const newName = trimmedName.toLowerCase().endsWith(".pdf")
       ? trimmedName
       : `${trimmedName}.pdf`;
@@ -280,12 +250,6 @@ export default function LibraryScreen() {
 
     try {
       setRenaming(true);
-
-      console.log("Rename debug:", {
-        id: documentToRename?.id,
-        newName,
-        idType: typeof documentToRename?.id,
-      });
 
       await renameDocument(documentToRename.id, newName);
 
@@ -310,47 +274,66 @@ export default function LibraryScreen() {
     }
   }
 
+  // Deletes the file and its database record.
+  // Confirmation is handled by the custom Delete Confirmation Modal.
   async function handleDelete(item) {
-    Alert.alert(
-      "Delete PDF",
-      `Are you sure you want to delete "${item.name}"? This action cannot be undone.`,
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              // Delete the physical PDF file first.
-              const file = new File(item.uri);
+    if (!item || deleting) return;
 
-              if (file.exists) {
-                file.delete();
-              }
+    try {
+      setDeleting(true);
 
-              // Then remove its database record.
-              await deleteDocument(item.id);
+      const file = new File(item.uri);
 
-              // Update the Library UI.
-              setDocuments((current) =>
-                current.filter((document) => document.id !== item.id),
-              );
+      if (file.exists) {
+        file.delete();
+      }
 
-              Alert.alert("Deleted", "The PDF was deleted successfully.");
-            } catch (error) {
-              console.error("Failed to delete PDF:", error);
+      await deleteDocument(item.id);
 
-              Alert.alert(
-                "Delete failed",
-                "Could not delete this PDF. Please try again.",
-              );
-            }
-          },
-        },
-      ],
+      setDocuments((current) =>
+        current.filter((document) => document.id !== item.id),
+      );
+
+      setDeleteConfirmVisible(false);
+      setDocumentToDelete(null);
+
+      Alert.alert("Deleted", "The PDF was deleted successfully.");
+    } catch (error) {
+      console.error("Failed to delete PDF:", error);
+
+      Alert.alert(
+        "Delete failed",
+        "Could not delete this PDF. Please try again.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function renderDocument({ item }) {
+    return (
+      <View style={styles.documentCard}>
+        <View style={styles.pdfIcon}>
+          <Text style={styles.pdfIconText}>PDF</Text>
+        </View>
+
+        <View style={styles.documentInfo}>
+          <Text style={styles.documentName} numberOfLines={2}>
+            {item.name}
+          </Text>
+
+          <Text style={styles.documentSize}>{formatSize(item.size)}</Text>
+        </View>
+
+        <Pressable
+          onPress={() => setMenuDocument(item)}
+          style={styles.menuButton}
+          accessibilityRole="button"
+          accessibilityLabel={`Options for ${item.name}`}
+        >
+          <Text style={styles.menuButtonText}>{"\u22EE"}</Text>
+        </Pressable>
+      </View>
     );
   }
 
@@ -358,7 +341,16 @@ export default function LibraryScreen() {
     return (
       <ReaderScreen
         document={selectedDocument}
-        onBack={() => setSelectedDocument(null)}
+        onBack={async () => {
+          setSelectedDocument(null);
+
+          try {
+            const updatedDocuments = await getDocuments();
+            setDocuments(updatedDocuments);
+          } catch (error) {
+            console.error("Failed to refresh Library:", error);
+          }
+        }}
       />
     );
   }
@@ -408,6 +400,7 @@ export default function LibraryScreen() {
         <View style={styles.sortOptions}>
           {[
             { label: "Date Added", value: "date-newest" },
+            { label: "Recently Opened", value: "recently-opened" },
             { label: "Name A–Z", value: "name-asc" },
             { label: "Name Z–A", value: "name-desc" },
             { label: "Largest", value: "size-largest" },
@@ -466,6 +459,142 @@ export default function LibraryScreen() {
         Imported documents are copied into this app's private storage.
       </Text>
 
+      {/* Document Options Modal — outside renderDocument */}
+      <Modal
+        visible={!!menuDocument}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuDocument(null)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setMenuDocument(null)}
+        >
+          <Pressable
+            style={styles.optionsModal}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={styles.optionsTitle}>Document Options</Text>
+            <Text style={styles.optionsSubtitle} numberOfLines={2}>
+              {menuDocument?.name}
+            </Text>
+
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => openDocument(menuDocument)}
+            >
+              <Text style={styles.optionText}>Open PDF</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => {
+                const item = menuDocument;
+                setMenuDocument(null);
+
+                if (!item) return;
+
+                Alert.alert(
+                  "PDF Details",
+                  [
+                    `Name: ${item.name}`,
+                    `File size: ${formatSize(item.size ?? 0)}`,
+                    `Pages: ${
+                      item.page_count > 0 ? item.page_count : "Not available"
+                    }`,
+                    `Date added: ${formatDate(item.created_at)}`,
+                    `Last opened: ${formatDate(item.last_opened_at)}`,
+                  ].join("\n"),
+                  [{ text: "Close" }],
+                );
+              }}
+            >
+              <Text style={styles.optionText}>Details</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => {
+                const item = menuDocument;
+                setMenuDocument(null);
+
+                if (item) openRename(item);
+              }}
+            >
+              <Text style={styles.optionText}>Rename</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => {
+                const item = menuDocument;
+                setMenuDocument(null);
+
+                if (item) {
+                  setDocumentToDelete(item);
+                  setDeleteConfirmVisible(true);
+                }
+              }}
+            >
+              <Text style={styles.deleteOptionText}>Delete PDF</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.optionRow, styles.optionCancel]}
+              onPress={() => setMenuDocument(null)}
+            >
+              <Text style={styles.optionCancelText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Delete Confirmation Modal — outside renderDocument */}
+      <Modal
+        visible={deleteConfirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteConfirmation}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.optionsModal}>
+            <Text style={styles.optionsTitle}>Delete PDF?</Text>
+
+            <Text style={styles.optionsSubtitle}>
+              Are you sure you want to delete "{documentToDelete?.name}"? This
+              action cannot be undone.
+            </Text>
+
+            <View style={styles.renameActions}>
+              <Pressable
+                style={[styles.renameButton, styles.cancelButton]}
+                onPress={closeDeleteConfirmation}
+                disabled={deleting}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.renameButton,
+                  styles.deleteConfirmButton,
+                  deleting && styles.disabled,
+                ]}
+                onPress={() => handleDelete(documentToDelete)}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.deleteConfirmText}>Delete</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Existing Rename Modal */}
       <Modal
         visible={renameVisible}
         transparent
@@ -576,37 +705,31 @@ const styles = StyleSheet.create({
     marginTop: 20,
     minHeight: 50,
   },
-
   searchIcon: {
     fontSize: 25,
     color: "#777D91",
     marginRight: 10,
   },
-
   searchInput: {
     flex: 1,
     color: "#24263A",
     fontSize: 14,
     paddingVertical: 12,
   },
-
   sortContainer: {
     marginTop: 15,
   },
-
   sortLabel: {
     color: "#777D91",
     fontSize: 12,
     fontWeight: "700",
     marginBottom: 10,
   },
-
   sortOptions: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
   },
-
   sortChip: {
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -615,18 +738,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#ECECF4",
   },
-
   sortChipActive: {
     backgroundColor: "#EFEEFF",
     borderColor: "#6C63FF",
   },
-
   sortChipText: {
     fontSize: 11,
     fontWeight: "600",
     color: "#777D91",
   },
-
   sortChipTextActive: {
     color: "#6C63FF",
     fontWeight: "800",
@@ -728,20 +848,17 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 12,
   },
-
   menuButton: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     alignItems: "center",
     justifyContent: "center",
   },
-
   menuButtonText: {
     fontSize: 24,
     fontWeight: "700",
     color: "#6C63FF",
   },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(20, 20, 40, 0.45)",
@@ -749,7 +866,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 24,
   },
-
   renameModal: {
     width: "100%",
     maxWidth: 420,
@@ -757,20 +873,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 22,
   },
-
   renameTitle: {
     fontSize: 21,
     fontWeight: "700",
     color: "#171A2B",
   },
-
   renameDescription: {
     fontSize: 14,
     color: "#77798B",
     marginTop: 8,
     marginBottom: 18,
   },
-
   renameInput: {
     borderWidth: 1,
     borderColor: "#DAD9F5",
@@ -780,14 +893,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#171A2B",
   },
-
   renameActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
     gap: 10,
     marginTop: 20,
   },
-
   renameButton: {
     minWidth: 90,
     paddingVertical: 11,
@@ -796,22 +907,72 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
   cancelButton: {
     backgroundColor: "#F0F0F8",
   },
-
   saveButton: {
     backgroundColor: "#6C63FF",
   },
-
   cancelButtonText: {
     color: "#414258",
     fontWeight: "600",
   },
-
   saveButtonText: {
     color: "#FFFFFF",
     fontWeight: "600",
+  },
+  optionsModal: {
+    width: "90%",
+    maxWidth: 380,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 20,
+  },
+  optionsTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#171A2B",
+  },
+  optionsSubtitle: {
+    fontSize: 13,
+    color: "#77798B",
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  optionRow: {
+    minHeight: 48,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#EEEEF5",
+  },
+  optionText: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#24263A",
+  },
+  deleteOptionText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#D32F45",
+  },
+  optionCancel: {
+    marginTop: 4,
+    borderTopWidth: 0,
+    backgroundColor: "#F2F1FA",
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  optionCancelText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#5147A8",
+  },
+  deleteConfirmButton: {
+    backgroundColor: "#D32F45",
+  },
+  deleteConfirmText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
 });

@@ -73,6 +73,7 @@ export async function mergePdfFiles(documents, outputName) {
     id: fileName,
     name: `${safeBaseName}.pdf`,
     uri: outputFile.uri,
-    size: outputFile.size,
+    size: outputFile.size || pdfBytes.length,
+    pageCount: mergedPdf.getPageCount(),
   };
 }

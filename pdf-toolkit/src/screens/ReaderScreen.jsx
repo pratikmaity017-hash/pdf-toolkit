@@ -9,6 +9,7 @@ import {
 import { WebView } from "react-native-webview";
 import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
+import { updateDocumentPageCount } from "../database/database";
 
 const PDFJS_BUNDLE = require("../../assets/pdfjs.bundle.txt");
 const PDFJS_WORKER_BUNDLE = require("../../assets/pdfjs.worker.bundle.txt");
@@ -425,12 +426,7 @@ export default function ReaderScreen({ document, onBack }) {
                       // Keep the displayed dimensions independent of pixel resolution.
                       canvas.style.width = "100%";
                       canvas.style.height = "auto";
-                      console.log("PDF canvas size:", {
-                        pageNumber,
-                        width: canvas.width,
-                        height: canvas.height,
-                        pixelRatio,
-                      });
+                     
 
                       shell.appendChild(canvas);
 
@@ -735,6 +731,8 @@ export default function ReaderScreen({ document, onBack }) {
                       data: bytes,
                     }).promise;
 
+                    notifyNative("pageCount:" + pdf.numPages);
+
                     status.textContent = "Preparing pages…";
 
                     createPageShells();
@@ -828,7 +826,30 @@ export default function ReaderScreen({ document, onBack }) {
               originWhitelist={["*"]}
               javaScriptEnabled
               allowFileAccess
-              onMessage={handleWebViewMessage}
+              onMessage={async (event) => {
+                const message = event.nativeEvent.data;
+
+                
+
+                if (message.startsWith("pageCount:")) {
+                  const pageCount = Number(message.slice("pageCount:".length));
+
+                  
+
+                  if (
+                    Number.isInteger(pageCount) &&
+                    pageCount > 0 &&
+                    document?.id
+                  ) {
+                    try {
+                      await updateDocumentPageCount(document.id, pageCount);
+                     
+                    } catch (error) {
+                      console.error("Failed to save PDF page count:", error);
+                    }
+                  }
+                }
+              }}
               onError={() => {
                 setLoading(false);
                 setError("The PDF viewer failed to load.");
