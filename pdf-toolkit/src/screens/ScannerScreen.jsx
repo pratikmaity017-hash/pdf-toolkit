@@ -8,6 +8,10 @@ import {
   TextInput,
   Text,
   View,
+  ScrollView,
+  useWindowDimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -19,6 +23,7 @@ import { saveDocument } from "../database/database";
 
 export default function ScannerScreen({ onBack }) {
   const cameraRef = useRef(null);
+  const scrollViewRef = useRef(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [capturedImage, setCapturedImage] = useState(null);
   const [capturedPages, setCapturedPages] = useState([]);
@@ -27,6 +32,14 @@ export default function ScannerScreen({ onBack }) {
   const [fileName, setFileName] = useState("Scanned-Document");
   const [creatingPdf, setCreatingPdf] = useState(false);
   const [smartScanning, setSmartScanning] = useState(false);
+  const [flashEnabled, setFlashEnabled] = useState(false);
+  const [cameraSessionKey, setCameraSessionKey] = useState(0);
+  const { height: screenHeight } = useWindowDimensions();
+
+  const hasPages = capturedPages.length > 0;
+  const compactPreview = hasPages || Boolean(capturedImage);
+
+  const previewHeight = Math.min(screenHeight * 0.42, 300);
 
   async function takePicture() {
     if (!cameraRef.current || capturing || capturedImage || !cameraReady) {
@@ -266,7 +279,11 @@ export default function ScannerScreen({ onBack }) {
               setCapturedPages([]);
               setCapturedImage(null);
               setFileName("Scanned-Document");
+
+              // Reset the camera after the success alert is dismissed.
               setCameraReady(false);
+              setCameraSessionKey((previous) => previous + 1);
+              setFlashEnabled(false);
             },
           },
         ],
@@ -292,7 +309,15 @@ export default function ScannerScreen({ onBack }) {
 
   if (!permission.granted) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView
+        // style={styles.container}
+        ref={scrollViewRef}
+        style={[styles.bottomPanel, hasPages && styles.bottomPanelExpanded]}
+        contentContainerStyle={styles.bottomPanelContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
         <View style={styles.permissionCard}>
           <Text style={styles.title}>Camera permission required</Text>
 
@@ -326,40 +351,57 @@ export default function ScannerScreen({ onBack }) {
         <Pressable
           style={styles.backButton}
           onPress={onBack}
-          disabled={capturing}
+          disabled={capturing || smartScanning || creatingPdf}
         >
           <Text style={styles.backButtonText}>‹ Back</Text>
         </Pressable>
 
-        <Text style={styles.headerTitle}>Scan Document</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Scan Document</Text>
+          <Text style={styles.headerSubtitle}>Scan your pages into a PDF</Text>
+        </View>
 
         <View style={styles.headerSpacer} />
       </View>
 
-      <View style={styles.previewContainer}>
+      <View
+        style={[
+          styles.previewContainer,
+          compactPreview && {
+            flex: 0,
+            height: previewHeight,
+          },
+        ]}
+      >
         {capturedImage ? (
           <Image
             source={{ uri: capturedImage.uri }}
-            style={styles.preview}
+            style={styles.camera}
             resizeMode="contain"
           />
         ) : (
           <CameraView
             ref={cameraRef}
-            style={{
-              width: "100%",
-              height: "100%",
-            }}
+            style={styles.camera}
             facing="back"
             mode="picture"
-            onCameraReady={() => {
-              setCameraReady(true);
-            }}
+            key={cameraSessionKey}
+            enableTorch={flashEnabled}
+            onCameraReady={() => setCameraReady(true)}
             onMountError={(event) => {
               Alert.alert("Camera Error", event.message);
             }}
           />
         )}
+
+        <Pressable
+          style={[styles.flashButton, flashEnabled && styles.flashButtonActive]}
+          onPress={() => setFlashEnabled((previous) => !previous)}
+        >
+          <Text style={styles.flashButtonText}>
+            {flashEnabled ? "⚡ Flash On" : "⚡ Flash Off"}
+          </Text>
+        </Pressable>
 
         {!capturedImage && (
           <View pointerEvents="none" style={styles.scanFrame}>
@@ -369,136 +411,194 @@ export default function ScannerScreen({ onBack }) {
             <View style={[styles.corner, styles.bottomRight]} />
           </View>
         )}
+
+        <View style={styles.previewBadge}>
+          <View style={styles.previewBadgeDot} />
+          <Text style={styles.previewBadgeText}>
+            {capturedImage ? "Page Preview" : "Live Camera"}
+          </Text>
+        </View>
       </View>
 
-      {capturedPages.length > 0 && (
-        <View style={styles.pagesSection}>
-          <Text style={styles.pagesTitle}>
-            Scanned Pages ({capturedPages.length})
-          </Text>
-
-          <View style={styles.pagesList}>
-            {capturedPages.map((page, index) => (
-              <View key={page.id} style={styles.pageItem}>
-                <Image
-                  source={{ uri: page.uri }}
-                  style={styles.pageThumbnail}
-                  resizeMode="cover"
-                />
-
-                <Text style={styles.pageNumber}>Page {index + 1}</Text>
-
-                <Pressable
-                  style={styles.removePageButton}
-                  onPress={() => removePage(page.id)}
-                >
-                  <Text style={styles.removePageText}>×</Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
-
-          <View style={styles.pagesActions}>
-            <Pressable style={styles.secondaryButton} onPress={retakeLastPage}>
-              <Text style={styles.secondaryButtonText}>Retake Last</Text>
-            </Pressable>
-
-            <Text style={styles.pageCountText}>
-              {capturedPages.length} page
-              {capturedPages.length === 1 ? "" : "s"} ready
-            </Text>
-          </View>
-          <Text style={styles.filenameLabel}>PDF filename</Text>
-
-          <TextInput
-            style={styles.filenameInput}
-            value={fileName}
-            onChangeText={setFileName}
-            placeholder="Enter PDF filename"
-            placeholderTextColor="#9296A8"
-            autoCapitalize="words"
-            editable={!creatingPdf}
-            maxLength={100}
-          />
-
-          <Pressable
-            style={[
-              styles.createPdfButton,
-              creatingPdf && styles.disabledButton,
-            ]}
-            onPress={createPDF}
-            disabled={creatingPdf}
-          >
-            {creatingPdf ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Create PDF</Text>
-            )}
-          </Pressable>
-        </View>
-      )}
-
-      <View style={styles.controls}>
-        {!capturedImage && (
-          <Pressable
-            style={[
-              styles.smartScanButton,
-              (smartScanning || capturing || creatingPdf) &&
-                styles.disabledButton,
-            ]}
-            onPress={startSmartScan}
-            disabled={smartScanning || capturing || creatingPdf}
-          >
-            {smartScanning ? (
-              <View style={styles.smartScanButtonContent}>
-                <ActivityIndicator color="#FFFFFF" />
-                <Text style={styles.smartScanButtonText}>
-                  Scanning document...
+      <ScrollView
+        ref={scrollViewRef}
+        style={[styles.bottomPanel, hasPages && styles.bottomPanelExpanded]}
+        contentContainerStyle={styles.bottomPanelContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="none"
+      >
+        {hasPages && (
+          <View style={styles.pagesSection}>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.pagesTitle}>Your Scanned Pages</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Review and manage your document
                 </Text>
               </View>
-            ) : (
-              <Text style={styles.smartScanButtonText}>Smart Auto Scan</Text>
-            )}
-          </Pressable>
-        )}
 
-        <Text style={styles.instruction}>
-          {capturedImage
-            ? "Preview your captured document"
-            : "Align the document inside the frame"}
-        </Text>
+              <View style={styles.pageCountBadge}>
+                <Text style={styles.pageCountBadgeText}>
+                  {capturedPages.length}
+                </Text>
+              </View>
+            </View>
 
-        {capturedImage ? (
-          <View style={styles.actionRow}>
+            <View style={styles.pagesList}>
+              {capturedPages.map((page, index) => (
+                <View key={page.id} style={styles.pageItem}>
+                  <Image
+                    source={{ uri: page.uri }}
+                    style={styles.pageThumbnail}
+                    resizeMode="cover"
+                  />
+
+                  <Text style={styles.pageNumber}>Page {index + 1}</Text>
+
+                  <Pressable
+                    style={styles.removePageButton}
+                    onPress={() => removePage(page.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove page ${index + 1}`}
+                  >
+                    <Text style={styles.removePageText}>×</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.pagesActions}>
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={retakeLastPage}
+              >
+                <Text style={styles.secondaryButtonText}>Retake Last</Text>
+              </Pressable>
+
+              <Text style={styles.pageCountText}>
+                {capturedPages.length} page
+                {capturedPages.length === 1 ? "" : "s"} ready
+              </Text>
+            </View>
+
+            <View style={styles.formDivider} />
+
+            <Text style={styles.filenameLabel}>PDF filename</Text>
+
+            <TextInput
+              style={styles.filenameInput}
+              value={fileName}
+              onChangeText={setFileName}
+              placeholder="Enter PDF filename"
+              placeholderTextColor="#9296A8"
+              autoCapitalize="words"
+              editable={!creatingPdf}
+              maxLength={100}
+            />
+
             <Pressable
-              style={styles.secondaryButton}
-              onPress={() => setCapturedImage(null)}
+              style={[
+                styles.createPdfButton,
+                creatingPdf && styles.disabledButton,
+              ]}
+              onPress={createPDF}
+              disabled={creatingPdf}
             >
-              <Text style={styles.secondaryButtonText}>Retake</Text>
-            </Pressable>
-
-            <Pressable style={styles.primaryButton} onPress={addCurrentPage}>
-              <Text style={styles.primaryButtonText}>Add Page</Text>
+              {creatingPdf ? (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text style={styles.primaryButtonText}>Creating PDF...</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  Create PDF · {capturedPages.length}{" "}
+                  {capturedPages.length === 1 ? "Page" : "Pages"}
+                </Text>
+              )}
             </Pressable>
           </View>
-        ) : (
-          <Pressable
-            style={[styles.captureButton, capturing && styles.disabledButton]}
-            onPress={takePicture}
-            disabled={capturing}
-          >
-            {capturing ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <View style={styles.captureInner} />
-            )}
-          </Pressable>
         )}
 
-        <Text style={styles.footerText}>
-          Your scans will be processed locally on your device.
-        </Text>
-      </View>
+        <View style={styles.controls}>
+          {!capturedImage && (
+            <Pressable
+              style={[
+                styles.smartScanButton,
+                (smartScanning || capturing || creatingPdf) &&
+                  styles.disabledButton,
+              ]}
+              onPress={startSmartScan}
+              disabled={smartScanning || capturing || creatingPdf}
+            >
+              {smartScanning ? (
+                <View style={styles.smartScanButtonContent}>
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text style={styles.smartScanButtonText}>
+                    Scanning document...
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.smartScanButtonContent}>
+                  <Text style={styles.smartScanIcon}>✦</Text>
+                  <View style={styles.smartScanTextGroup}>
+                    <Text style={styles.smartScanButtonText}>
+                      Smart Auto Scan
+                    </Text>
+                    <Text style={styles.smartScanSubtext}>
+                      Automatically detect document pages
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </Pressable>
+          )}
+
+          <Text style={styles.instruction}>
+            {capturedImage
+              ? "Review this image before adding it"
+              : "Or align a page inside the frame and capture it manually"}
+          </Text>
+
+          {capturedImage ? (
+            <View style={styles.actionRow}>
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() => setCapturedImage(null)}
+              >
+                <Text style={styles.secondaryButtonText}>Retake</Text>
+              </Pressable>
+
+              <Pressable style={styles.primaryButton} onPress={addCurrentPage}>
+                <Text style={styles.primaryButtonText}>+ Add Page</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              style={[
+                styles.captureButton,
+                (capturing || !cameraReady) && styles.disabledButton,
+              ]}
+              onPress={takePicture}
+              disabled={capturing || !cameraReady || smartScanning}
+            >
+              {capturing ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <View style={styles.captureInner} />
+              )}
+            </Pressable>
+          )}
+
+          {!capturedImage && (
+            <Text style={styles.manualCaptureLabel}>TAP TO CAPTURE</Text>
+          )}
+
+          <Text style={styles.footerText}>
+            Your scans are processed locally on your device.
+          </Text>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -526,70 +626,100 @@ function bytesToBase64(bytes) {
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: "#F6F7FC",
   },
+
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#F6F7FC",
   },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingVertical: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
+    minHeight: 66,
   },
+
   backButton: {
-    minWidth: 65,
-    paddingVertical: 8,
+    minWidth: 62,
+    paddingVertical: 9,
   },
+
   backButtonText: {
     color: "#6C63FF",
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: "800",
   },
+
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+  },
+
   headerTitle: {
     color: "#171A2B",
     fontSize: 18,
     fontWeight: "800",
   },
-  headerSpacer: {
-    width: 65,
+
+  headerSubtitle: {
+    color: "#9296A8",
+    fontSize: 11,
+    marginTop: 3,
   },
+
+  headerSpacer: {
+    width: 62,
+  },
+
   previewContainer: {
     flex: 1,
+    minHeight: 140,
     marginHorizontal: 14,
-    marginTop: 6,
-    marginBottom: 12,
-    borderRadius: 20,
+    marginTop: 2,
+    marginBottom: 8,
+    borderRadius: 22,
     overflow: "hidden",
     backgroundColor: "#171A2B",
-    justifyContent: "center",
-    alignItems: "center",
   },
+
   camera: {
-    ...StyleSheet.absoluteFillObject,
+    width: "100%",
+    height: "100%",
   },
+
   preview: {
     ...StyleSheet.absoluteFillObject,
     width: "100%",
     height: "100%",
   },
+
   scanFrame: {
     position: "absolute",
     width: "78%",
     height: "68%",
+    alignSelf: "center",
+    top: "16%",
   },
+
   corner: {
     position: "absolute",
     width: 30,
     height: 30,
     borderColor: "#FFFFFF",
+    borderWidth: 0,
   },
+
   topLeft: {
     top: 0,
     left: 0,
@@ -597,6 +727,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderTopLeftRadius: 8,
   },
+
   topRight: {
     top: 0,
     right: 0,
@@ -604,6 +735,7 @@ const styles = StyleSheet.create({
     borderRightWidth: 4,
     borderTopRightRadius: 8,
   },
+
   bottomLeft: {
     bottom: 0,
     left: 0,
@@ -611,6 +743,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderBottomLeftRadius: 8,
   },
+
   bottomRight: {
     bottom: 0,
     right: 0,
@@ -618,107 +751,194 @@ const styles = StyleSheet.create({
     borderRightWidth: 4,
     borderBottomRightRadius: 8,
   },
-  controls: {
-    paddingHorizontal: 22,
-    paddingTop: 12,
-    paddingBottom: 18,
+
+  previewBadge: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: "rgba(15, 18, 35, 0.78)",
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+
+  previewBadgeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#8D83FF",
+    marginRight: 7,
+  },
+
+  previewBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  bottomPanel: {
+    flex: 0,
+    flexShrink: 1,
+    maxHeight: "52%",
+  },
+
+  bottomPanelExpanded: {
+    flex: 1,
+    maxHeight: undefined,
+  },
+  bottomPanelContent: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 12,
+  },
+
+  controls: {
+    alignItems: "center",
+    paddingTop: 4,
+    paddingBottom: 8,
   },
 
   smartScanButton: {
     width: "100%",
-    minHeight: 48,
+    minHeight: 66,
     backgroundColor: "#292D45",
-    borderRadius: 13,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
-    alignItems: "center",
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 15,
     justifyContent: "center",
-    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#414662",
   },
 
   smartScanButtonContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 11,
+  },
+
+  smartScanIcon: {
+    color: "#C6C0FF",
+    fontSize: 26,
+    fontWeight: "700",
+  },
+
+  smartScanTextGroup: {
+    flex: 1,
   },
 
   smartScanButtonText: {
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  smartScanSubtext: {
+    color: "#C0C3D5",
+    fontSize: 11,
+    marginTop: 4,
   },
 
   instruction: {
     color: "#777D91",
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 18,
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 14,
+    paddingHorizontal: 8,
   },
+
   captureButton: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: "#6C63FF",
     borderWidth: 5,
     borderColor: "#DCD9FF",
     alignItems: "center",
     justifyContent: "center",
   },
+
   captureInner: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 49,
+    height: 49,
+    borderRadius: 25,
     backgroundColor: "#FFFFFF",
   },
+
+  manualCaptureLabel: {
+    color: "#777D91",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.5,
+    marginTop: 8,
+  },
+
   actionRow: {
+    width: "100%",
     flexDirection: "row",
     gap: 12,
     alignItems: "center",
+    justifyContent: "center",
   },
+
   primaryButton: {
+    flex: 1,
+    minHeight: 46,
     backgroundColor: "#6C63FF",
     borderRadius: 13,
-    paddingHorizontal: 22,
-    paddingVertical: 13,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
   },
+
   primaryButtonText: {
     color: "#FFFFFF",
     fontSize: 14,
-    fontWeight: "700",
+    fontWeight: "800",
+    textAlign: "center",
   },
+
   secondaryButton: {
+    minHeight: 46,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#ECECF4",
+    borderColor: "#E4E5EE",
     borderRadius: 13,
-    paddingHorizontal: 22,
-    paddingVertical: 13,
+    paddingHorizontal: 17,
+    paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
   },
+
   secondaryButtonText: {
     color: "#393B52",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
+    textAlign: "center",
   },
+
   disabledButton: {
     opacity: 0.55,
   },
+
   permissionCard: {
     flex: 1,
     padding: 28,
     justifyContent: "center",
   },
+
   title: {
     color: "#171A2B",
     fontSize: 25,
     fontWeight: "800",
     marginBottom: 12,
   },
+
   infoText: {
     color: "#777D91",
     fontSize: 14,
@@ -726,28 +946,63 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 18,
   },
+
   footerText: {
     color: "#9296A8",
-    fontSize: 11,
-    marginTop: 18,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 13,
     textAlign: "center",
   },
+
   pagesSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#EAEAF3",
+    padding: 14,
+    marginBottom: 15,
+  },
+
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
   },
 
   pagesTitle: {
     color: "#171A2B",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  sectionSubtitle: {
+    color: "#9296A8",
+    fontSize: 11,
+    marginTop: 4,
+  },
+
+  pageCountBadge: {
+    minWidth: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: "#EFEDFF",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+
+  pageCountBadgeText: {
+    color: "#6C63FF",
     fontSize: 14,
     fontWeight: "800",
-    marginBottom: 10,
   },
 
   pagesList: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
+    gap: 12,
   },
 
   pageItem: {
@@ -759,100 +1014,86 @@ const styles = StyleSheet.create({
   pageThumbnail: {
     width: 72,
     height: 88,
-    borderRadius: 8,
+    borderRadius: 9,
     backgroundColor: "#E4E5EE",
+    borderWidth: 1,
+    borderColor: "#E4E5EE",
   },
 
   pageNumber: {
-    color: "#393B52",
+    color: "#555970",
     fontSize: 10,
-    marginTop: 5,
+    fontWeight: "700",
+    marginTop: 6,
   },
 
   removePageButton: {
     position: "absolute",
     top: -7,
     right: -4,
-    width: 23,
-    height: 23,
+    width: 24,
+    height: 24,
     borderRadius: 12,
     backgroundColor: "#E5484D",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 2,
   },
 
   removePageText: {
     color: "#FFFFFF",
     fontSize: 17,
-    fontWeight: "700",
-    lineHeight: 20,
+    fontWeight: "800",
+    lineHeight: 19,
   },
 
   pagesActions: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 10,
+    gap: 10,
+    marginTop: 15,
   },
 
   pageCountText: {
     color: "#777D91",
-    fontSize: 12,
-    fontWeight: "600",
+    fontSize: 11,
+    fontWeight: "700",
   },
-  pagesSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+
+  formDivider: {
+    height: 1,
+    backgroundColor: "#EEEEF5",
+    marginTop: 16,
   },
-  pagesTitle: {
-    color: "#171A2B",
-    fontSize: 14,
-    fontWeight: "800",
-    marginBottom: 10,
-  },
-  pagesList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  pageItem: {
-    width: 76,
-    alignItems: "center",
-  },
-  pageThumbnail: {
-    width: 72,
-    height: 88,
-    borderRadius: 8,
-    backgroundColor: "#E4E5EE",
-  },
-  pageNumber: {
-    color: "#393B52",
-    fontSize: 10,
-    marginTop: 5,
-  },
+
   filenameLabel: {
     color: "#393B52",
     fontSize: 13,
-    fontWeight: "700",
-    marginTop: 16,
+    fontWeight: "800",
+    marginTop: 15,
     marginBottom: 8,
   },
 
   filenameInput: {
     width: "100%",
-    backgroundColor: "#FFFFFF",
+    minHeight: 47,
+    backgroundColor: "#F8F8FC",
     borderWidth: 1,
     borderColor: "#E4E5EE",
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 11,
     color: "#171A2B",
     fontSize: 14,
+    marginBottom: 12,
   },
 
   createPdfButton: {
     width: "100%",
-    minHeight: 48,
+    minHeight: 49,
     backgroundColor: "#6C63FF",
     borderRadius: 13,
     paddingHorizontal: 18,
@@ -860,5 +1101,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginTop: 12,
+  },
+
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  flashButton: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    zIndex: 10,
+    backgroundColor: "rgba(23, 26, 43, 0.85)",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.25)",
+  },
+
+  flashButtonActive: {
+    backgroundColor: "#6C63FF",
+    borderColor: "#8D86FF",
+  },
+
+  flashButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
   },
 });
