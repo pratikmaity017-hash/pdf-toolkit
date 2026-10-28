@@ -414,7 +414,7 @@ export default function ReaderScreen({ document, onBack }) {
                       // Increase backing resolution for clearer text.
                       const pixelRatio = Math.min(
                         window.devicePixelRatio || 1,
-                        1.5
+                        3
                       );
 
                       const canvas = document.createElement("canvas");

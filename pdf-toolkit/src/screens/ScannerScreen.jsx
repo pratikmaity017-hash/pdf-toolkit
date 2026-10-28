@@ -26,6 +26,7 @@ export default function ScannerScreen({ onBack }) {
   const [cameraReady, setCameraReady] = useState(false);
   const [fileName, setFileName] = useState("Scanned-Document");
   const [creatingPdf, setCreatingPdf] = useState(false);
+  const [smartScanning, setSmartScanning] = useState(false);
 
   async function takePicture() {
     if (!cameraRef.current || capturing || capturedImage || !cameraReady) {
@@ -52,6 +53,76 @@ export default function ScannerScreen({ onBack }) {
       );
     } finally {
       setCapturing(false);
+    }
+  }
+
+  async function startSmartScan() {
+    if (smartScanning || capturing || creatingPdf || capturedImage) {
+      return;
+    }
+
+    try {
+      setSmartScanning(true);
+
+      const result = await CameraView.scanDocumentAsync({
+        requestPdf: false,
+        quality: 1,
+      });
+
+      // User cancel korle ba kono page scan na hole.
+      if (!result?.pages?.length) {
+        return;
+      }
+
+      // Scanner-er temporary images nijer cache folder-e copy kori.
+      const scanDirectory = new Directory(
+        Paths.cache,
+        "pdf-toolkit-smart-scans",
+      );
+
+      if (!scanDirectory.exists) {
+        scanDirectory.create({
+          intermediates: true,
+          idempotent: true,
+        });
+      }
+
+      const batchId = Date.now();
+      const newPages = [];
+
+      for (let index = 0; index < result.pages.length; index++) {
+        const sourceUri = result.pages[index];
+
+        const destinationFile = new File(
+          scanDirectory,
+          `scan-${batchId}-${index}.jpg`,
+        );
+
+        await FileSystem.copyAsync({
+          from: sourceUri,
+          to: destinationFile.uri,
+        });
+
+        newPages.push({
+          id: `smart-${batchId}-${index}`,
+          uri: destinationFile.uri,
+        });
+      }
+
+      // Existing scanned pages preserve kore notun pages add kori.
+      setCapturedPages((previousPages) => [...previousPages, ...newPages]);
+
+      Alert.alert(
+        "Smart Scan Complete",
+        `${newPages.length} page(s) captured successfully.`,
+      );
+    } catch (error) {
+      Alert.alert(
+        "Smart Scan Failed",
+        error?.message || "Could not scan the document. Please try again.",
+      );
+    } finally {
+      setSmartScanning(false);
     }
   }
 
@@ -368,6 +439,29 @@ export default function ScannerScreen({ onBack }) {
       )}
 
       <View style={styles.controls}>
+        {!capturedImage && (
+          <Pressable
+            style={[
+              styles.smartScanButton,
+              (smartScanning || capturing || creatingPdf) &&
+                styles.disabledButton,
+            ]}
+            onPress={startSmartScan}
+            disabled={smartScanning || capturing || creatingPdf}
+          >
+            {smartScanning ? (
+              <View style={styles.smartScanButtonContent}>
+                <ActivityIndicator color="#FFFFFF" />
+                <Text style={styles.smartScanButtonText}>
+                  Scanning document...
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.smartScanButtonText}>Smart Auto Scan</Text>
+            )}
+          </Pressable>
+        )}
+
         <Text style={styles.instruction}>
           {capturedImage
             ? "Preview your captured document"
@@ -530,6 +624,32 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     alignItems: "center",
   },
+
+  smartScanButton: {
+    width: "100%",
+    minHeight: 48,
+    backgroundColor: "#292D45",
+    borderRadius: 13,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+
+  smartScanButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+
+  smartScanButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
   instruction: {
     color: "#777D91",
     fontSize: 13,
