@@ -23,6 +23,10 @@ function getFilenameFromUri(uri) {
     if (lastPart) {
       return decodeURIComponent(lastPart);
     }
+
+    if (filename.toLowerCase().endsWith(".pdf")) {
+      return filename;
+    }
   } catch {
     // Use the fallback filename below.
   }
