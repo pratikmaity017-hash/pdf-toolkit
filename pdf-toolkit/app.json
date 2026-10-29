@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "pdf-toolkit",
+    "name": "PDF Toolkit",
     "slug": "pdf-toolkit",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -17,7 +17,18 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "mimeType": "application/pdf"
+            }
+          ],
+          "category": ["DEFAULT", "BROWSABLE"]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -26,7 +37,16 @@
       "expo-sqlite",
       "expo-asset",
       "expo-status-bar",
-      "expo-sharing"
+      [
+        "expo-sharing",
+        {
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": ["application/pdf"],
+            "multipleShareMimeTypes": ["application/pdf"]
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 
 import MergePDFsScreen from "./MergePDFsScreen";
@@ -17,11 +17,29 @@ const tools = [
   ["Annotate PDF", "Add notes, highlights and signatures"],
 ];
 
-export default function ToolsScreen() {
+export default function ToolsScreen({ navigation, route }) {
   const [showMergeScreen, setShowMergeScreen] = useState(false);
   const [showScannerScreen, setShowScannerScreen] = useState(false);
   const [showConverterScreen, setShowConverterScreen] = useState(false);
   const [showSplitScreen, setShowSplitScreen] = useState(false);
+
+  useEffect(() => {
+    const feature = route?.params?.openFeature;
+
+    if (feature === "ScanPDF") {
+      setShowScannerScreen(true);
+    } else if (feature === "ConvertPDF") {
+      setShowConverterScreen(true);
+    } else if (feature === "MergePDFs") {
+      setShowMergeScreen(true);
+    } else if (feature === "SplitPDF") {
+      setShowSplitScreen(true);
+    }
+
+    if (feature) {
+      navigation.setParams({ openFeature: undefined });
+    }
+  }, [route?.params?.openFeature]);
 
   if (showMergeScreen) {
     return <MergePDFsScreen onBack={() => setShowMergeScreen(false)} />;

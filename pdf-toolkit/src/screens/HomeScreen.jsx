@@ -1,13 +1,36 @@
 import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 
 const features = [
-  { icon: "▤", title: "PDF Reader", subtitle: "Read your documents" },
-  { icon: "✎", title: "Create PDF", subtitle: "Turn text into PDF" },
-  { icon: "⇄", title: "Merge PDFs", subtitle: "Combine documents" },
-  { icon: "▣", title: "Scan Document", subtitle: "Scan with your camera" },
+  {
+    icon: "▣",
+    title: "Scan PDF",
+    subtitle: "Scan documents into PDF",
+    screen: "ScanPDF",
+  },
+  {
+    icon: "⇄",
+    title: "Convert Files to PDF",
+    subtitle: "Convert images and documents",
+    screen: "ConvertPDF",
+  },
+  {
+    icon: "⇄",
+    title: "Merge PDFs",
+    subtitle: "Combine multiple PDFs",
+    screen: "MergePDFs",
+  },
+  {
+    icon: "▤",
+    title: "Split PDF",
+    subtitle: "Separate PDF pages",
+    screen: "SplitPDF",
+  },
 ];
 
 export default function HomeScreen({ navigation }) {
+  const openFeature = (screen) => {
+    navigation.navigate("Tools", { openFeature: screen });
+  };
   return (
     <ScrollView
       style={styles.container}
@@ -53,7 +76,7 @@ export default function HomeScreen({ navigation }) {
               styles.featureCard,
               pressed && styles.pressed,
             ]}
-            onPress={() => navigation.navigate("Tools")}
+            onPress={() => openFeature(feature.screen)}
           >
             <View style={styles.featureIcon}>
               <Text style={styles.featureIconText}>{feature.icon}</Text>

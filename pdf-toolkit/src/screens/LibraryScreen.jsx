@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   ActivityIndicator,
@@ -26,7 +26,7 @@ import * as Sharing from "expo-sharing";
 
 const PDF_DIRECTORY = new Directory(Paths.document, "pdf-toolkit");
 
-export default function LibraryScreen() {
+export default function LibraryScreen({ route, navigation }) {
   const [documents, setDocuments] = useState([]);
   const [importing, setImporting] = useState(false);
   const [renameVisible, setRenameVisible] = useState(false);
@@ -46,6 +46,8 @@ export default function LibraryScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("date-newest");
   const [bulkMenuVisible, setBulkMenuVisible] = useState(false);
+
+  const processedIncomingRequestsRef = useRef(new Set());
 
   useFocusEffect(
     useCallback(() => {
@@ -71,6 +73,150 @@ export default function LibraryScreen() {
       };
     }, []),
   );
+
+  useEffect(() => {
+    const incomingPdfs = route?.params?.incomingPdfs;
+    const requestId = route?.params?.incomingPdfRequestId;
+
+    if (
+      requestId == null ||
+      !Array.isArray(incomingPdfs) ||
+      incomingPdfs.length === 0 ||
+      processedIncomingRequestsRef.current.has(requestId)
+    ) {
+      return;
+    }
+
+    // Mark this request before starting asynchronous work.
+    processedIncomingRequestsRef.current.add(requestId);
+
+    // Clear the parameters so they are not handled again on re-render.
+    navigation.setParams({
+      incomingPdfs: undefined,
+      incomingPdfRequestId: undefined,
+    });
+
+    async function importIncomingPdfs() {
+      const importedDocuments = [];
+      const failedFiles = [];
+
+      try {
+        if (!PDF_DIRECTORY.exists) {
+          PDF_DIRECTORY.create({
+            intermediates: true,
+            idempotent: true,
+          });
+        }
+
+        for (let index = 0; index < incomingPdfs.length; index++) {
+          const incoming = incomingPdfs[index];
+          let destinationFile = null;
+
+          try {
+            if (!incoming?.uri) {
+              throw new Error("The incoming PDF has no URI.");
+            }
+
+            const originalName = incoming.name || "Incoming document.pdf";
+
+            const fileName = originalName.toLowerCase().endsWith(".pdf")
+              ? originalName
+              : `${originalName}.pdf`;
+
+            const isPDF =
+              (incoming.mimeType || "").split(";")[0].trim().toLowerCase() ===
+                "application/pdf" || /\.pdf(?:[?#].*)?$/i.test(originalName);
+
+            if (!isPDF) {
+              throw new Error("The incoming file is not a PDF.");
+            }
+
+            const safeName = fileName.replace(/[\\/:*?"<>|]/g, "_");
+
+            // Unique private filename for this import operation.
+            const storedName = `incoming-${Date.now()}-${index}-${safeName}`;
+
+            destinationFile = new File(PDF_DIRECTORY, storedName);
+
+            // Copy the incoming URI into the app's private PDF directory.
+            await FileSystem.copyAsync({
+              from: incoming.uri,
+              to: destinationFile.uri,
+            });
+
+            const newDocument = {
+              id: storedName,
+              name: fileName,
+              uri: destinationFile.uri,
+              size: destinationFile.size || incoming.size || 0,
+            };
+
+            await saveDocument(newDocument);
+
+            importedDocuments.push(newDocument);
+          } catch (error) {
+            console.error(
+              `Failed to import incoming PDF: ${incoming?.name || "Unknown file"}`,
+              error,
+            );
+
+            // Remove a copied file if saving its database record failed.
+            try {
+              if (destinationFile?.exists) {
+                destinationFile.delete();
+              }
+            } catch (cleanupError) {
+              console.warn(
+                "Could not clean up the incoming file:",
+                cleanupError,
+              );
+            }
+
+            failedFiles.push(incoming?.name || "Unknown PDF");
+          }
+        }
+
+        // Refresh the Library from SQLite rather than relying only on state.
+        const savedDocuments = await getDocuments();
+        setDocuments(savedDocuments);
+
+        if (importedDocuments.length > 0) {
+          const firstDocument = importedDocuments[0];
+
+          try {
+            await markDocumentOpened(firstDocument.id);
+          } catch (error) {
+            console.warn("Could not update last-opened time:", error);
+          }
+
+          // Open the first received PDF in the existing ReaderScreen.
+          setSelectedDocument(firstDocument);
+        } else {
+          Alert.alert(
+            "Could not open PDF",
+            failedFiles.length
+              ? "The received PDF could not be imported. Please try sharing it again."
+              : "No valid PDF was received.",
+          );
+        }
+
+        if (failedFiles.length > 0) {
+          console.warn(
+            `${failedFiles.length} incoming PDF(s) failed to import.`,
+          );
+        }
+      } catch (error) {
+        console.error("Incoming PDF processing failed:", error);
+
+        Alert.alert(
+          "Import failed",
+          "PDF Toolkit could not import the received PDF. Please try again.",
+        );
+      }
+    }
+
+    void importIncomingPdfs();
+  }, [route?.params?.incomingPdfRequestId, navigation]);
 
   async function importPDF() {
     try {
