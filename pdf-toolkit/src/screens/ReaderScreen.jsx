@@ -75,15 +75,21 @@ export default function ReaderScreen({ document, onBack }) {
                   box-sizing: border-box;
                 }
 
-                 html,body {
+                html, body {
                   margin: 0;
                   padding: 0;
                   width: 100%;
                   height: 100%;
+                  min-height: 0;
                   overflow: hidden;
                   background: #F6F7FC;
                   font-family: Arial, sans-serif;
                   color: #171A2B;
+                }
+
+                body {
+                  display: flex;
+                  flex-direction: column;
                 }
 
                 .toolbar {
@@ -129,25 +135,28 @@ export default function ReaderScreen({ document, onBack }) {
                   color: #414258;
                 }
 
-                #pages {
-                  display: flex;
-                  flex-direction: column;
-                  align-items: center;
-                  gap: 14px;
-                  padding: 12px 0 28px;
-                }
+               
 
                
 
+                #status {
+                  flex: 0 0 auto;
+                  padding: 8px 12px;
+                  background: #F6F7FC;
+                }
+
                 #pages {
                   width: 100%;
-                  height: calc(100% - 64px);
+                  height: auto;
+                  flex: 1 1 0;
+                  min-height: 0;
                   display: flex;
                   flex-direction: column;
                   align-items: flex-start;
                   gap: 14px;
-                  padding: 12px 0 28px;
-                  overflow: auto;
+                  padding: 8px 0 28px;
+                  overflow-y: auto;
+                  overflow-x: auto;
                   overscroll-behavior: contain;
                   -webkit-overflow-scrolling: touch;
                 }
@@ -172,7 +181,9 @@ export default function ReaderScreen({ document, onBack }) {
                 }
 
                 #pages.single-page-mode {
-                  height: calc(100% - 64px);
+                  height: auto;
+                  flex: 1 1 0;
+                  min-height: 0;
                   padding: 8px 0 24px;
                   overflow: auto;
                 }
@@ -828,6 +839,19 @@ export default function ReaderScreen({ document, onBack }) {
               allowFileAccess
               onMessage={async (event) => {
                 const message = event.nativeEvent.data;
+
+                // Hide the native loading overlay once PDF.js has rendered a page.
+                if (message === "ready") {
+                  setLoading(false);
+                  setError("");
+                  return;
+                }
+
+                if (message.startsWith("error:")) {
+                  setLoading(false);
+                  setError(message.slice("error:".length));
+                  return;
+                }
 
                 if (message.startsWith("pageCount:")) {
                   const pageCount = Number(message.slice("pageCount:".length));

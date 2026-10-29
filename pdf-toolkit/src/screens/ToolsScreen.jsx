@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import MergePDFsScreen from "./MergePDFsScreen";
 import ScannerScreen from "./ScannerScreen";
 import ConvertFilesToPDFScreen from "./ConvertFilesToPDFScreen";
+import SplitPDFScreen from "./SplitPDFScreen";
 
 const tools = [
   ["PDF Reader", "Open and read PDF documents"],
@@ -20,6 +21,7 @@ export default function ToolsScreen() {
   const [showMergeScreen, setShowMergeScreen] = useState(false);
   const [showScannerScreen, setShowScannerScreen] = useState(false);
   const [showConverterScreen, setShowConverterScreen] = useState(false);
+  const [showSplitScreen, setShowSplitScreen] = useState(false);
 
   if (showMergeScreen) {
     return <MergePDFsScreen onBack={() => setShowMergeScreen(false)} />;
@@ -33,6 +35,10 @@ export default function ToolsScreen() {
     return (
       <ConvertFilesToPDFScreen onBack={() => setShowConverterScreen(false)} />
     );
+  }
+
+  if (showSplitScreen) {
+    return <SplitPDFScreen onBack={() => setShowSplitScreen(false)} />;
   }
 
   return (
@@ -56,6 +62,8 @@ export default function ToolsScreen() {
               setShowScannerScreen(true);
             } else if (title === "Convert Files to PDF") {
               setShowConverterScreen(true);
+            } else if (title === "Split PDF") {
+              setShowSplitScreen(true);
             }
           }}
         >
