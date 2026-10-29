@@ -22,7 +22,12 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-sqlite", "expo-asset", "expo-status-bar"],
+    "plugins": [
+      "expo-sqlite",
+      "expo-asset",
+      "expo-status-bar",
+      "expo-sharing"
+    ],
     "extra": {
       "eas": {
         "projectId": "006d994f-4fc2-4e37-9bf8-f789a49d3fd5"

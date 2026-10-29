@@ -291,8 +291,6 @@ export default function ConvertFilesToPDFScreen({ onBack }) {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      console.log("PDF saved:", destination.uri);
-
       // 8. Register the PDF in the existing SQLite library.
       const fileInfo = await FileSystem.getInfoAsync(destination.uri);
 

@@ -20,8 +20,9 @@ import {
 } from "../database/database";
 import ReaderScreen from "./ReaderScreen";
 import * as DocumentPicker from "expo-document-picker";
-import { Directory, File, Paths } from "expo-file-system";
+import { Directory, File, FileMode, Paths } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 
 const PDF_DIRECTORY = new Directory(Paths.document, "pdf-toolkit");
 
@@ -33,6 +34,9 @@ export default function LibraryScreen() {
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   const [menuDocument, setMenuDocument] = useState(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
@@ -41,6 +45,7 @@ export default function LibraryScreen() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("date-newest");
+  const [bulkMenuVisible, setBulkMenuVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -310,12 +315,329 @@ export default function LibraryScreen() {
     }
   }
 
+  function startSelection(item) {
+    setSelectionMode(true);
+    setSelectedIds([item.id]);
+    setMenuDocument(null);
+  }
+
+  function toggleSelection(item) {
+    setSelectedIds((current) => {
+      if (current.includes(item.id)) {
+        const next = current.filter((id) => id !== item.id);
+
+        return next;
+      }
+
+      return [...current, item.id];
+    });
+  }
+
+  function exitSelectionMode() {
+    if (bulkActionLoading) return;
+
+    setSelectionMode(false);
+    setSelectedIds([]);
+  }
+
+  function handleDocumentPress(item) {
+    if (selectionMode) {
+      toggleSelection(item);
+      return;
+    }
+
+    openDocument(item);
+  }
+
+  async function handleBulkShare() {
+    setBulkMenuVisible(false);
+
+    const selectedDocuments = documents.filter((item) =>
+      selectedIds.includes(item.id),
+    );
+
+    if (selectedDocuments.length === 0) {
+      Alert.alert("No PDFs selected", "Please select at least one PDF.");
+      return;
+    }
+
+    try {
+      const available = await Sharing.isAvailableAsync();
+
+      if (!available) {
+        Alert.alert(
+          "Sharing unavailable",
+          "Sharing is not available on this device.",
+        );
+        return;
+      }
+
+      setBulkActionLoading(true);
+
+      for (const item of selectedDocuments) {
+        await Sharing.shareAsync(item.uri, {
+          mimeType: "application/pdf",
+          dialogTitle: `Share ${item.name}`,
+          UTI: "com.adobe.pdf",
+        });
+      }
+    } catch (error) {
+      console.error("Bulk share failed:", error);
+      Alert.alert("Share failed", "Could not share the selected PDF files.");
+    } finally {
+      setBulkActionLoading(false);
+    }
+  }
+
+  async function performBulkDelete(selectedDocuments) {
+    setBulkActionLoading(true);
+
+    let deletedCount = 0;
+    let failedCount = 0;
+
+    try {
+      for (const item of selectedDocuments) {
+        try {
+          try {
+            const file = new File(item.uri);
+
+            if (file.exists) {
+              file.delete();
+            }
+          } catch (fileError) {
+            console.warn("Could not delete physical file:", fileError);
+          }
+
+          await deleteDocument(item.id);
+          deletedCount++;
+        } catch (error) {
+          console.error("Could not delete document:", item.name, error);
+          failedCount++;
+        }
+      }
+
+      setDocuments(await getDocuments());
+      setSelectedIds([]);
+      setSelectionMode(false);
+
+      if (failedCount === 0) {
+        Alert.alert(
+          "Deleted",
+          `${deletedCount} PDF${deletedCount === 1 ? "" : "s"} deleted successfully.`,
+        );
+      } else {
+        Alert.alert(
+          "Delete completed with errors",
+          `${deletedCount} deleted, ${failedCount} failed.`,
+        );
+      }
+    } catch (error) {
+      console.error("Bulk delete failed:", error);
+      Alert.alert("Error", "Could not complete the delete operation.");
+    } finally {
+      setBulkActionLoading(false);
+    }
+  }
+
+  function handleBulkDelete() {
+    setBulkMenuVisible(false);
+
+    const selectedDocuments = documents.filter((item) =>
+      selectedIds.includes(item.id),
+    );
+
+    if (selectedDocuments.length === 0) {
+      Alert.alert("No PDFs selected", "Please select at least one PDF.");
+      return;
+    }
+
+    Alert.alert(
+      "Delete selected PDFs?",
+      `You are about to delete ${selectedDocuments.length} PDF(s). This cannot be undone.`,
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => performBulkDelete(selectedDocuments),
+        },
+      ],
+    );
+  }
+
+  const SAVE_LOCATION_FILE = `${FileSystem.documentDirectory}pdf-save-location.json`;
+
+  async function getSaveDirectoryUri() {
+    // আগে থেকে save করা folder permission URI আছে কি না দেখো
+    const configInfo = await FileSystem.getInfoAsync(SAVE_LOCATION_FILE);
+
+    if (configInfo.exists) {
+      try {
+        const savedConfig = JSON.parse(
+          await FileSystem.readAsStringAsync(SAVE_LOCATION_FILE),
+        );
+
+        if (savedConfig.directoryUri) {
+          return savedConfig.directoryUri;
+        }
+      } catch (error) {
+        console.warn("Could not read saved folder:", error);
+      }
+    }
+
+    // প্রথমবার: Android picker Documents folder থেকে শুরু হবে
+    const initialUri =
+      FileSystem.StorageAccessFramework.getUriForDirectoryInRoot("Documents");
+
+    const permission =
+      await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
+        initialUri,
+      );
+
+    if (!permission.granted) {
+      return null;
+    }
+
+    // Folder URI ভবিষ্যতের জন্য মনে রাখো
+    await FileSystem.writeAsStringAsync(
+      SAVE_LOCATION_FILE,
+      JSON.stringify({
+        directoryUri: permission.directoryUri,
+      }),
+    );
+
+    return permission.directoryUri;
+  }
+
+  async function handleBulkSaveToDevice() {
+    setBulkMenuVisible(false);
+
+    const selectedDocuments = documents.filter((item) =>
+      selectedIds.includes(item.id),
+    );
+
+    if (selectedDocuments.length === 0) {
+      Alert.alert("No PDFs selected", "Please select at least one PDF.");
+      return;
+    }
+
+    try {
+      setBulkActionLoading(true);
+
+      const directoryUri = await getSaveDirectoryUri();
+
+      if (!directoryUri) {
+        Alert.alert(
+          "Save cancelled",
+          "Choose the Documents folder to save your PDFs.",
+        );
+        return;
+      }
+
+      let savedCount = 0;
+      let failedCount = 0;
+
+      for (const item of selectedDocuments) {
+        try {
+          const safeName = item.name
+            .replace(/[\\/:*?"<>|]/g, "_")
+            .replace(/\.pdf$/i, "");
+
+          const destinationUri =
+            await FileSystem.StorageAccessFramework.createFileAsync(
+              directoryUri,
+              safeName,
+              "application/pdf",
+            );
+
+          const sourceFile = new File(item.uri);
+          const destinationFile = new File(destinationUri);
+
+          let sourceHandle;
+          let destinationHandle;
+
+          try {
+            sourceHandle = sourceFile.open(FileMode.ReadOnly);
+            destinationHandle = destinationFile.open(FileMode.WriteOnly);
+
+            while (true) {
+              const chunk = await sourceHandle.readBytes(64 * 1024);
+
+              if (chunk.length === 0) {
+                break;
+              }
+
+              await destinationHandle.writeBytes(chunk);
+            }
+
+            savedCount++;
+          } catch (error) {
+            console.error("Could not save PDF:", item.name, error);
+          } finally {
+            sourceHandle?.close();
+            destinationHandle?.close();
+          }
+        } catch (error) {
+          console.error("Could not save PDF:", item.name, error);
+          failedCount++;
+        }
+      }
+
+      Alert.alert(
+        "Export finished",
+        `${savedCount} PDF(s) saved successfully.${
+          failedCount ? ` ${failedCount} file(s) failed.` : ""
+        }`,
+      );
+    } catch (error) {
+      console.error("Save to Device failed:", error);
+      Alert.alert("Export failed", "Could not save the selected PDFs.");
+    } finally {
+      setBulkActionLoading(false);
+    }
+  }
+
   function renderDocument({ item }) {
     return (
-      <View style={styles.documentCard}>
+      <Pressable
+        onPress={() => handleDocumentPress(item)}
+        onLongPress={() => {
+          if (!selectionMode) startSelection(item);
+        }}
+        delayLongPress={350}
+        style={[
+          styles.documentCard,
+          selectionMode &&
+            selectedIds.includes(item.id) &&
+            styles.documentCardSelected,
+        ]}
+      >
         <View style={styles.pdfIcon}>
           <Text style={styles.pdfIconText}>PDF</Text>
         </View>
+
+        {selectionMode && (
+          <Pressable
+            onPress={(event) => {
+              event.stopPropagation();
+              toggleSelection(item);
+            }}
+            style={[
+              styles.selectionCheckbox,
+              selectedIds.includes(item.id) && styles.selectionCheckboxActive,
+            ]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: selectedIds.includes(item.id) }}
+            accessibilityLabel={`Select ${item.name}`}
+          >
+            {selectedIds.includes(item.id) && (
+              <Text style={styles.selectionCheckmark}>✓</Text>
+            )}
+          </Pressable>
+        )}
 
         <View style={styles.documentInfo}>
           <Text style={styles.documentName} numberOfLines={2}>
@@ -325,15 +647,17 @@ export default function LibraryScreen() {
           <Text style={styles.documentSize}>{formatSize(item.size)}</Text>
         </View>
 
-        <Pressable
-          onPress={() => setMenuDocument(item)}
-          style={styles.menuButton}
-          accessibilityRole="button"
-          accessibilityLabel={`Options for ${item.name}`}
-        >
-          <Text style={styles.menuButtonText}>{"\u22EE"}</Text>
-        </Pressable>
-      </View>
+        {!selectionMode && (
+          <Pressable
+            onPress={() => setMenuDocument(item)}
+            style={styles.menuButton}
+            accessibilityRole="button"
+            accessibilityLabel={`Options for ${item.name}`}
+          >
+            <Text style={styles.menuButtonText}>{"\u22EE"}</Text>
+          </Pressable>
+        )}
+      </Pressable>
     );
   }
 
@@ -357,27 +681,108 @@ export default function LibraryScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.eyebrow}>YOUR FILES</Text>
-      <Text style={styles.title}>My Library</Text>
-      <Text style={styles.description}>
-        Import and manage PDFs stored on your device.
-      </Text>
+      {selectionMode && (
+        <View style={styles.selectionHeader}>
+          <Pressable
+            onPress={() => setBulkMenuVisible(true)}
+            style={styles.selectionMenuButton}
+            accessibilityRole="button"
+            accessibilityLabel="Selection actions"
+          >
+            <Text style={styles.menuButtonText}>{"\u22EE"}</Text>
+          </Pressable>
 
-      <Pressable
-        style={({ pressed }) => [
-          styles.importButton,
-          pressed && styles.pressed,
-          importing && styles.disabled,
-        ]}
-        onPress={importPDF}
-        disabled={importing}
-      >
-        {importing ? (
-          <ActivityIndicator color="#FFFFFF" />
-        ) : (
-          <Text style={styles.importButtonText}>＋ Import PDF</Text>
-        )}
-      </Pressable>
+          <Text style={styles.selectionHeaderTitle}>
+            {selectedIds.length} selected
+          </Text>
+
+          <Pressable
+            onPress={exitSelectionMode}
+            style={styles.selectionCancelButton}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel selection"
+          >
+            <Text style={styles.selectionCancelText}>{"\u2715"}</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.selectAllControl}
+            onPress={() => {
+              const visibleIds = filteredDocuments.map((item) => item.id);
+              const allVisibleSelected =
+                visibleIds.length > 0 &&
+                visibleIds.every((id) => selectedIds.includes(id));
+
+              if (allVisibleSelected) {
+                setSelectedIds((current) =>
+                  current.filter((id) => !visibleIds.includes(id)),
+                );
+              } else {
+                setSelectedIds((current) => [
+                  ...new Set([...current, ...visibleIds]),
+                ]);
+              }
+            }}
+            accessibilityRole="checkbox"
+            accessibilityState={{
+              checked:
+                filteredDocuments.length > 0 &&
+                filteredDocuments.every((item) =>
+                  selectedIds.includes(item.id),
+                ),
+            }}
+          >
+            <View
+              style={[
+                styles.selectionCheckbox,
+                filteredDocuments.length > 0 &&
+                  filteredDocuments.every((item) =>
+                    selectedIds.includes(item.id),
+                  ) &&
+                  styles.selectionCheckboxActive,
+              ]}
+            >
+              {filteredDocuments.length > 0 &&
+                filteredDocuments.every((item) =>
+                  selectedIds.includes(item.id),
+                ) && <Text style={styles.selectionCheckmark}>✓</Text>}
+            </View>
+
+            <Text style={styles.selectAllText}>
+              {filteredDocuments.length > 0 &&
+              filteredDocuments.every((item) => selectedIds.includes(item.id))
+                ? "Deselect All"
+                : "Select All"}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+      {!selectionMode && (
+        <>
+          <Text style={styles.eyebrow}>YOUR FILES</Text>
+          <Text style={styles.title}>My Library</Text>
+
+          <Text style={styles.description}>
+            Import and manage PDFs stored on your device.
+          </Text>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.importButton,
+              pressed && styles.pressed,
+              importing && styles.disabled,
+            ]}
+            onPress={importPDF}
+            disabled={importing}
+          >
+            {importing ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.importButtonText}>＋ Import PDF</Text>
+            )}
+          </Pressable>
+        </>
+      )}
 
       <View style={styles.searchContainer}>
         <Text style={styles.searchIcon}>⌕</Text>
@@ -429,8 +834,15 @@ export default function LibraryScreen() {
       </View>
 
       <View style={styles.listHeader}>
-        <Text style={styles.sectionTitle}>Your Documents</Text>
-        <Text style={styles.count}>{filteredDocuments.length}</Text>
+        <Text style={styles.sectionTitle}>
+          {selectionMode
+            ? `${selectedIds.length} PDFs selected`
+            : "Your Documents"}
+        </Text>
+
+        {!selectionMode && (
+          <Text style={styles.count}>{filteredDocuments.length}</Text>
+        )}
       </View>
 
       <FlatList
@@ -545,6 +957,59 @@ export default function LibraryScreen() {
             >
               <Text style={styles.optionCancelText}>Cancel</Text>
             </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={bulkMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBulkMenuVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setBulkMenuVisible(false)}
+        >
+          <Pressable
+            style={styles.menuModal}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={styles.menuTitle}>Selected PDFs</Text>
+
+            <Pressable
+              style={styles.menuOption}
+              disabled={bulkActionLoading}
+              onPress={handleBulkShare}
+            >
+              <Text style={styles.menuOptionText}>Share</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.menuOption}
+              disabled={bulkActionLoading}
+              onPress={handleBulkSaveToDevice}
+            >
+              <Text style={styles.menuOptionText}>Save to Device</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.menuOption}
+              disabled={bulkActionLoading}
+              onPress={handleBulkDelete}
+            >
+              <Text style={[styles.menuOptionText, { color: "#E5484D" }]}>
+                Delete
+              </Text>
+            </Pressable>
+
+            {bulkActionLoading && (
+              <ActivityIndicator
+                size="small"
+                color="#6C63FF"
+                style={{ marginTop: 12 }}
+              />
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -973,6 +1438,129 @@ const styles = StyleSheet.create({
   },
   deleteConfirmText: {
     color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  documentCardSelected: {
+    borderColor: "#6C63FF",
+    borderWidth: 2,
+    backgroundColor: "#F4F2FF",
+  },
+  selectionCheckbox: {
+    width: 23,
+    height: 23,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: "#B8B8CC",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  selectionCheckboxActive: {
+    backgroundColor: "#6C63FF",
+    borderColor: "#6C63FF",
+  },
+  selectionCheckmark: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  selectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 44,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+
+  selectionMenuButton: {
+    width: 38,
+    height: 38,
+    alignItems: "flex-start",
+    justifyContent: "center",
+  },
+  selectionCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#EFEEFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectionCloseText: {
+    color: "#6C63FF",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  selectionHeaderTitle: {
+    flex: 1,
+    marginLeft: 8,
+    color: "#24263A",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  selectAllControl: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingVertical: 8,
+    paddingLeft: 8,
+  },
+  selectAllButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: "#EFEEFF",
+  },
+  selectAllText: {
+    color: "#6C63FF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  menuModal: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 20,
+    elevation: 8,
+  },
+
+  menuTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#24263A",
+    marginBottom: 12,
+  },
+
+  menuOption: {
+    minHeight: 48,
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F5",
+  },
+
+  menuOptionText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#24263A",
+  },
+  selectionCancelButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#FCEBEC",
+    alignItems: "center",
+    justifyContent: "center",
+    marginHorizontal: 8,
+  },
+
+  selectionCancelText: {
+    color: "#D94343",
+    fontSize: 17,
     fontWeight: "700",
   },
 });
