@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
+
 import MergePDFsScreen from "./MergePDFsScreen";
 import ScannerScreen from "./ScannerScreen";
+import ConvertFilesToPDFScreen from "./ConvertFilesToPDFScreen";
+
 const tools = [
   ["PDF Reader", "Open and read PDF documents"],
   ["Create PDF", "Create a PDF from text"],
+  ["Convert Files to PDF", "Convert images and documents into PDFs"],
   ["Merge PDFs", "Combine multiple PDF files"],
   ["Split PDF", "Separate pages into new files"],
   ["Rotate Pages", "Correct page orientation"],
@@ -15,17 +19,28 @@ const tools = [
 export default function ToolsScreen() {
   const [showMergeScreen, setShowMergeScreen] = useState(false);
   const [showScannerScreen, setShowScannerScreen] = useState(false);
+  const [showConverterScreen, setShowConverterScreen] = useState(false);
 
   if (showMergeScreen) {
     return <MergePDFsScreen onBack={() => setShowMergeScreen(false)} />;
   }
+
   if (showScannerScreen) {
     return <ScannerScreen onBack={() => setShowScannerScreen(false)} />;
   }
+
+  if (showConverterScreen) {
+    return (
+      <ConvertFilesToPDFScreen onBack={() => setShowConverterScreen(false)} />
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.eyebrow}>WORK WITH DOCUMENTS</Text>
+
       <Text style={styles.title}>PDF Tools</Text>
+
       <Text style={styles.description}>
         Everything you need to manage your documents in one place.
       </Text>
@@ -37,9 +52,10 @@ export default function ToolsScreen() {
           onPress={() => {
             if (title === "Merge PDFs") {
               setShowMergeScreen(true);
-            }
-            if (title === "Scan Document") {
+            } else if (title === "Scan Document") {
               setShowScannerScreen(true);
+            } else if (title === "Convert Files to PDF") {
+              setShowConverterScreen(true);
             }
           }}
         >
