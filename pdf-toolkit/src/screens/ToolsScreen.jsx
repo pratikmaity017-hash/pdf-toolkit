@@ -5,6 +5,9 @@ import MergePDFsScreen from "./MergePDFsScreen";
 import ScannerScreen from "./ScannerScreen";
 import ConvertFilesToPDFScreen from "./ConvertFilesToPDFScreen";
 import SplitPDFScreen from "./SplitPDFScreen";
+import OrganizePDFScreen from "./OrganizePDFScreen";
+import PDFAnnotatorScreen from "./PDFAnnotatorScreen";
+import PDFWatermarkScreen from "./PDFWatermarkScreen";
 
 const tools = [
   ["PDF Reader", "Open and read PDF documents"],
@@ -15,6 +18,8 @@ const tools = [
   ["Rotate Pages", "Correct page orientation"],
   ["Scan Document", "Capture documents with your camera"],
   ["Annotate PDF", "Add notes, highlights and signatures"],
+  ["Organize PDF", "Reorder, rotate, duplicate and delete pages"],
+  ["PDF Watermark", "Add custom watermarks to PDF files"],
 ];
 
 export default function ToolsScreen({ navigation, route }) {
@@ -22,6 +27,9 @@ export default function ToolsScreen({ navigation, route }) {
   const [showScannerScreen, setShowScannerScreen] = useState(false);
   const [showConverterScreen, setShowConverterScreen] = useState(false);
   const [showSplitScreen, setShowSplitScreen] = useState(false);
+  const [showOrganizeScreen, setShowOrganizeScreen] = useState(false);
+  const [showAnnotatorScreen, setShowAnnotatorScreen] = useState(false);
+  const [showWatermarkScreen, setShowWatermarkScreen] = useState(false);
 
   useEffect(() => {
     const feature = route?.params?.openFeature;
@@ -34,6 +42,12 @@ export default function ToolsScreen({ navigation, route }) {
       setShowMergeScreen(true);
     } else if (feature === "SplitPDF") {
       setShowSplitScreen(true);
+    } else if (feature === "OrganizePDF") {
+      setShowOrganizeScreen(true);
+    } else if (feature === "AnnotatePDF") {
+      setShowAnnotatorScreen(true);
+    } else if (feature === "WatermarkPDF") {
+      setShowWatermarkScreen(true);
     }
 
     if (feature) {
@@ -59,6 +73,17 @@ export default function ToolsScreen({ navigation, route }) {
     return <SplitPDFScreen onBack={() => setShowSplitScreen(false)} />;
   }
 
+  if (showOrganizeScreen) {
+    return <OrganizePDFScreen onBack={() => setShowOrganizeScreen(false)} />;
+  }
+
+  if (showAnnotatorScreen) {
+    return <PDFAnnotatorScreen onBack={() => setShowAnnotatorScreen(false)} />;
+  }
+  if (showWatermarkScreen) {
+    return <PDFWatermarkScreen onBack={() => setShowWatermarkScreen(false)} />;
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.eyebrow}>WORK WITH DOCUMENTS</Text>
@@ -82,6 +107,12 @@ export default function ToolsScreen({ navigation, route }) {
               setShowConverterScreen(true);
             } else if (title === "Split PDF") {
               setShowSplitScreen(true);
+            } else if (title === "Organize PDF") {
+              setShowOrganizeScreen(true);
+            } else if (title === "Annotate PDF") {
+              setShowAnnotatorScreen(true);
+            } else if (title === "PDF Watermark") {
+              setShowWatermarkScreen(true);
             }
           }}
         >

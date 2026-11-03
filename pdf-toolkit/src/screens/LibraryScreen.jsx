@@ -19,6 +19,7 @@ import {
   markDocumentOpened,
 } from "../database/database";
 import ReaderScreen from "./ReaderScreen";
+import OrganizePDFScreen from "./OrganizePDFScreen";
 import * as DocumentPicker from "expo-document-picker";
 import { Directory, File, FileMode, Paths } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
@@ -41,6 +42,7 @@ export default function LibraryScreen({ route, navigation }) {
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   const [menuDocument, setMenuDocument] = useState(null);
+  const [organizeDocument, setOrganizeDocument] = useState(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [documentToDelete, setDocumentToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -833,6 +835,24 @@ export default function LibraryScreen({ route, navigation }) {
     );
   }
 
+  if (organizeDocument) {
+    return (
+      <OrganizePDFScreen
+        initialDocument={organizeDocument}
+        onBack={async () => {
+          setOrganizeDocument(null);
+
+          try {
+            const updatedDocuments = await getDocuments();
+            setDocuments(updatedDocuments);
+          } catch (error) {
+            console.error("Failed to refresh Library:", error);
+          }
+        }}
+      />
+    );
+  }
+
   if (selectedDocument) {
     return (
       <ReaderScreen
@@ -1068,6 +1088,19 @@ export default function LibraryScreen({ route, navigation }) {
               onPress={() => openDocument(menuDocument)}
             >
               <Text style={styles.optionText}>Open PDF</Text>
+            </Pressable>
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => {
+                const item = menuDocument;
+                setMenuDocument(null);
+
+                if (item) {
+                  setOrganizeDocument(item);
+                }
+              }}
+            >
+              <Text style={styles.optionText}>Organize Pages</Text>
             </Pressable>
 
             <Pressable
