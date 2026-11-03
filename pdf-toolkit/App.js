@@ -6,6 +6,7 @@ import {
   useNavigationContainerRef,
 } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import ReactNativeBlobUtil from "react-native-blob-util";
 import { useIncomingShare } from "expo-sharing";
 
 import HomeScreen from "./src/screens/HomeScreen";
@@ -15,20 +16,19 @@ import SettingsScreen from "./src/screens/SettingsScreen";
 
 const Tab = createBottomTabNavigator();
 
-function getFilenameFromUri(uri) {
+async function getFilenameFromUri(uri) {
   try {
-    const path = uri.split(/[?#]/)[0];
-    const lastPart = path.split("/").pop();
+    const fileInfo = await ReactNativeBlobUtil.fs.stat(uri);
 
-    if (lastPart) {
-      return decodeURIComponent(lastPart);
-    }
+    console.log("Android file metadata:", fileInfo);
 
-    if (filename.toLowerCase().endsWith(".pdf")) {
+    const filename = fileInfo.filename?.trim();
+
+    if (filename && filename.toLowerCase().endsWith(".pdf")) {
       return filename;
     }
-  } catch {
-    // Use the fallback filename below.
+  } catch (error) {
+    console.log("Could not retrieve PDF metadata:", error.message);
   }
 
   return "Opened document.pdf";
@@ -70,7 +70,7 @@ export default function App() {
 
   // Handle PDFs received through Android's VIEW action.
   const handleIncomingUrl = useCallback(
-    (url) => {
+    async (url) => {
       if (
         typeof url !== "string" ||
         (!url.startsWith("content://") && !url.startsWith("file://"))
@@ -84,14 +84,16 @@ export default function App() {
 
       handledViewUrisRef.current.add(url);
 
-      const name = getFilenameFromUri(url);
+      console.log("Incoming PDF URI:", url);
+
+      const name = await getFilenameFromUri(url);
+
+      console.log("Detected PDF filename:", name);
 
       sendPdfsToLibrary([
         {
           uri: url,
-          name: name.toLowerCase().endsWith(".pdf")
-            ? name
-            : "Opened document.pdf",
+          name,
           mimeType: "application/pdf",
           size: 0,
           source: "view",
