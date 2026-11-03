@@ -2,8 +2,13 @@
   "name": "pdf-toolkit",
   "version": "1.0.0",
   "main": "index.js",
+  "private": true,
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "./modules"
+    }
+  },
   "dependencies": {
-    "@expo/config-plugins": "~58.0.0",
     "@pdf-lib/fontkit": "^1.1.1",
     "@react-navigation/bottom-tabs": "^7.21.0",
     "@react-navigation/native": "^7.5.1",
@@ -35,7 +40,6 @@
     "ios": "expo run:ios",
     "web": "expo start --web"
   },
-  "private": true,
   "devDependencies": {
     "esbuild": "^0.28.2"
   }

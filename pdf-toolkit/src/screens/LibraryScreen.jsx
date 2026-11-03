@@ -23,6 +23,8 @@ import * as DocumentPicker from "expo-document-picker";
 import { Directory, File, FileMode, Paths } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import { Platform } from "react-native";
+import PdfMultiShare from "../../modules/pdf-multi-share/src/PdfMultiShareModule";
 
 const PDF_DIRECTORY = new Directory(Paths.document, "pdf-toolkit");
 
@@ -508,28 +510,52 @@ export default function LibraryScreen({ route, navigation }) {
     }
 
     try {
-      const available = await Sharing.isAvailableAsync();
-
-      if (!available) {
-        Alert.alert(
-          "Sharing unavailable",
-          "Sharing is not available on this device.",
-        );
-        return;
-      }
-
       setBulkActionLoading(true);
 
-      for (const item of selectedDocuments) {
+      // Preserve the existing single-file sharing behaviour.
+      if (selectedDocuments.length === 1) {
+        const available = await Sharing.isAvailableAsync();
+
+        if (!available) {
+          Alert.alert(
+            "Sharing unavailable",
+            "Sharing is not available on this device.",
+          );
+
+          return;
+        }
+
+        const item = selectedDocuments[0];
+
         await Sharing.shareAsync(item.uri, {
           mimeType: "application/pdf",
           dialogTitle: `Share ${item.name}`,
           UTI: "com.adobe.pdf",
         });
+
+        return;
       }
+
+      // Multiple-file sharing is currently implemented for Android.
+      if (Platform.OS !== "android" || !PdfMultiShare) {
+        Alert.alert(
+          "Not supported",
+          "Multiple PDF sharing is currently available on Android.",
+        );
+
+        return;
+      }
+
+      const fileUris = selectedDocuments.map((item) => item.uri);
+
+      await PdfMultiShare.sharePdfs(fileUris);
     } catch (error) {
-      console.error("Bulk share failed:", error);
-      Alert.alert("Share failed", "Could not share the selected PDF files.");
+      console.error("Bulk PDF sharing failed:", error);
+
+      Alert.alert(
+        "Share failed",
+        error?.message || "Could not share the selected PDF files.",
+      );
     } finally {
       setBulkActionLoading(false);
     }

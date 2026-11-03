@@ -1,4 +1,4 @@
-const { withAndroidManifest } = require("@expo/config-plugins");
+const { withAndroidManifest } = require("expo/config-plugins");
 
 function withPdfIntentFilter(config) {
   return withAndroidManifest(config, (config) => {

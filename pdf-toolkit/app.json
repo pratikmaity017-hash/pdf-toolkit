@@ -47,7 +47,8 @@
           }
         }
       ],
-      "./plugins/withPdfIntentFilter"
+      "./plugins/withPdfIntentFilter",
+      "./plugins/withPdfMultiShare"
     ],
     "extra": {
       "eas": {
